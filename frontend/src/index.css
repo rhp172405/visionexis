@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-eyecog-navy: #0f1b2d;
+  --color-eyecog-navy-light: #16283f;
+  --color-eyecog-teal: #14b8a6;
+  --color-eyecog-orange: #f97316;
+  --color-eyecog-green: #10b981;
+  --color-eyecog-purple: #7c3aed;
+  --color-eyecog-bg: #eef3f8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-eyecog-bg text-slate-800 antialiased;
+}
