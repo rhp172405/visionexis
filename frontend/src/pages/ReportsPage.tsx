@@ -43,7 +43,9 @@ export function ReportsPage() {
     enabled: view === "combined",
   });
 
-  const filtered = filter === "all" ? sessions : sessions.filter((s) => s.task_type === filter);
+  const safeSessions = Array.isArray(sessions) ? sessions : [];
+  const safeAssessments = Array.isArray(assessments) ? assessments : [];
+  const filtered = filter === "all" ? safeSessions : safeSessions.filter((s) => s.task_type === filter);
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -53,8 +55,8 @@ export function ReportsPage() {
           <h1 className="text-lg font-semibold text-slate-800">Reports</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             {view === "individual"
-              ? `${sessions.length} completed session${sessions.length !== 1 ? "s" : ""} — PDF & CSV export available`
-              : `${assessments.length} patient visit${assessments.length !== 1 ? "s" : ""} — combined PDF spanning all 3 tests`}
+              ? `${safeSessions.length} completed session${safeSessions.length !== 1 ? "s" : ""} — PDF & CSV export available`
+              : `${safeAssessments.length} patient visit${safeAssessments.length !== 1 ? "s" : ""} — combined PDF spanning all 3 tests`}
           </p>
         </div>
       </div>

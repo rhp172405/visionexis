@@ -35,7 +35,7 @@ export function PatientAssessmentsTable({ assessments, onRefetch }: PatientAsses
   const [isRetaking, setIsRetaking] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  if (assessments.length === 0) {
+  if (!Array.isArray(assessments) || assessments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 py-16 text-center">
         <UserCheck className="h-10 w-10 text-slate-300 mb-2" />

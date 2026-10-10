@@ -98,15 +98,22 @@ export function DashboardPage() {
       </div>
 
       {isError && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Unable to load dashboard data. Please verify the backend service is running on port 8001.
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-amber-900">Backend API Standby / Offline</p>
+            <p className="text-xs text-amber-700 mt-1">
+              Running in standalone demonstration mode. Live backend database records are currently unavailable.
+              Webcam gaze tracking, 9-point calibration, and all 3 visual-cognitive assessment tasks remain fully operational in your browser.
+            </p>
+          </div>
         </div>
       )}
 
-      {data && data.kpis.flagged_cases > 0 && (
+      {Boolean(data?.kpis?.flagged_cases && data.kpis.flagged_cases > 0) && (
         <div className="flex items-center gap-2 rounded-md border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
           <AlertTriangle className="h-4 w-4" />
-          {data.kpis.flagged_cases} session{data.kpis.flagged_cases > 1 ? "s" : ""} recorded
+          {data?.kpis?.flagged_cases} session{(data?.kpis?.flagged_cases ?? 0) > 1 ? "s" : ""} recorded
           accuracy below the 70% exploratory research threshold.
         </div>
       )}
@@ -121,19 +128,19 @@ export function DashboardPage() {
         />
         <KpiCard
           label="Avg Battery Accuracy"
-          value={isLoading || data?.kpis.avg_accuracy == null ? "—" : `${data.kpis.avg_accuracy}%`}
+          value={isLoading || data?.kpis?.avg_accuracy == null ? "—" : `${data?.kpis?.avg_accuracy}%`}
           icon={Target}
           accent="green"
         />
         <KpiCard
           label="Flagged Cases"
-          value={isLoading ? "—" : String(data?.kpis.flagged_cases ?? 0)}
+          value={isLoading ? "—" : String(data?.kpis?.flagged_cases ?? 0)}
           icon={AlertTriangle}
           accent="orange"
         />
         <KpiCard
           label="Avg Task RT"
-          value={isLoading || data?.kpis.avg_task_time_s == null ? "—" : `${data.kpis.avg_task_time_s}s`}
+          value={isLoading || data?.kpis?.avg_task_time_s == null ? "—" : `${data?.kpis?.avg_task_time_s}s`}
           icon={Clock}
           accent="teal"
         />
@@ -164,7 +171,7 @@ export function DashboardPage() {
           </div>
         ) : (
           <PatientAssessmentsTable
-            assessments={data?.patient_assessments ?? []}
+            assessments={Array.isArray(data?.patient_assessments) ? data.patient_assessments : []}
             onRefetch={refetch}
           />
         )}
