@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -120,6 +120,7 @@ class AssessmentRead(BaseModel):
     started_at: datetime
     ended_at: Optional[datetime] = None
     tasks: List[AssessmentTaskStatus] = []
+    session_token: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +160,7 @@ class SessionRead(BaseModel):
     started_at: datetime
     ended_at: Optional[datetime] = None
     result: Optional[TaskResultRead] = None
+    session_token: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -285,5 +287,6 @@ class CombinedAssessmentReport(BaseModel):
     avg_accuracy: Optional[float] = None
     any_flagged: bool = False
     tasks: List[CombinedTaskDetail] = []
+    baseline_assessment: Optional[Dict[str, Any]] = None
     disclaimer: str
 

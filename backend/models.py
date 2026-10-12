@@ -116,6 +116,9 @@ class Assessment(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)
 
+    # Durable storage for Baseline Visual Assessment (MBT, phoria, vergence, NPC, VA)
+    baseline_json = Column(Text, nullable=True)
+
     patient = relationship("Patient", back_populates="assessments")
     task_sessions = relationship("TaskSession", back_populates="assessment")
 

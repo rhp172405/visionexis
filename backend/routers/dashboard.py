@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
+from auth import get_current_auth, require_operator, AuthContext
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -15,7 +16,11 @@ RECENT_SESSIONS_LIMIT = 10
 
 
 @router.get("/summary", response_model=schemas.DashboardResponse)
-def get_dashboard_summary(db: Session = Depends(get_db)):
+def get_dashboard_summary(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    require_operator(auth)
     today_start = datetime.combine(datetime.utcnow().date(), time.min)
 
     sessions_today = (

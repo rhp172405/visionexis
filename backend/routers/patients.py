@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
+from auth import get_current_auth, require_operator, enforce_patient_access, AuthContext
 
 router = APIRouter(prefix="/api/patients", tags=["patients"])
 
@@ -18,7 +19,12 @@ def _next_patient_code(db: Session) -> str:
 
 
 @router.post("", response_model=schemas.PatientRead, status_code=201)
-def create_patient(payload: schemas.PatientCreate, db: Session = Depends(get_db)):
+def create_patient(
+    payload: schemas.PatientCreate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    require_operator(auth)
     try:
         code = payload.patient_code.strip() if payload.patient_code and payload.patient_code.strip() else _next_patient_code(db)
         
@@ -61,13 +67,17 @@ def create_patient(payload: schemas.PatientCreate, db: Session = Depends(get_db)
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create patient: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create patient record due to internal error.")
 
 
 @router.get("", response_model=list[schemas.PatientSummary])
-def list_patients(db: Session = Depends(get_db)):
+def list_patients(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    require_operator(auth)
     return (
         db.query(models.Patient)
         .order_by(models.Patient.created_at.desc())
@@ -76,7 +86,12 @@ def list_patients(db: Session = Depends(get_db)):
 
 
 @router.get("/{patient_id}", response_model=schemas.PatientRead)
-def get_patient(patient_id: str, db: Session = Depends(get_db)):
+def get_patient(
+    patient_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    enforce_patient_access(auth, patient_id)
     patient = db.get(models.Patient, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")

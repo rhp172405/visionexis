@@ -7,14 +7,41 @@ import models
 import schemas
 from database import get_db
 from services.gaze_persistence import persist_session_gaze_events
+from auth import (
+    get_current_auth,
+    enforce_assessment_access,
+    enforce_session_access,
+    create_session_token,
+    create_ws_ticket,
+    AuthContext,
+)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 VALID_TASK_TYPES = {"visual_search", "memory", "reading"}
 
 
+@router.post("/{session_id}/ws-ticket")
+def issue_websocket_ticket(
+    session_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    """Issues a short-lived (60s), single-use WebSocket ticket bound strictly to this session."""
+    session = db.get(models.TaskSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    enforce_session_access(auth, session.id, session.patient_id)
+    ticket = create_ws_ticket(session_id=session.id, patient_id=session.patient_id, expires_in_seconds=60)
+    return {"ticket": ticket, "expires_in": 60, "session_id": session.id}
+
+
 @router.post("/create", response_model=schemas.SessionRead, status_code=201)
-def create_session(payload: schemas.SessionCreate, db: Session = Depends(get_db)):
+def create_session(
+    payload: schemas.SessionCreate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
     if payload.task_type not in VALID_TASK_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid task_type: {payload.task_type}")
 
@@ -28,6 +55,8 @@ def create_session(payload: schemas.SessionCreate, db: Session = Depends(get_db)
     if assessment.status != "in_progress":
         raise HTTPException(status_code=400, detail="Assessment is no longer in progress")
 
+    enforce_assessment_access(auth, assessment.id, assessment.patient_id)
+
     session = models.TaskSession(
         patient_id=payload.patient_id,
         assessment_id=payload.assessment_id,
@@ -37,24 +66,41 @@ def create_session(payload: schemas.SessionCreate, db: Session = Depends(get_db)
     db.add(session)
     db.commit()
     db.refresh(session)
-    return session
+
+    token = create_session_token(
+        patient_id=session.patient_id,
+        assessment_id=session.assessment_id,
+        session_id=session.id,
+    )
+    res = schemas.SessionRead.model_validate(session)
+    res.session_token = token
+    return res
 
 
 @router.get("/{session_id}", response_model=schemas.SessionRead)
-def get_session(session_id: str, db: Session = Depends(get_db)):
+def get_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
     session = db.get(models.TaskSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    enforce_session_access(auth, session.id, session.patient_id)
     return session
 
 
 @router.post("/{session_id}/complete", response_model=schemas.SessionRead)
 def complete_session(
-    session_id: str, payload: schemas.SessionCompleteRequest, db: Session = Depends(get_db)
+    session_id: str,
+    payload: schemas.SessionCompleteRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
 ):
     session = db.get(models.TaskSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    enforce_session_access(auth, session.id, session.patient_id)
 
     result = session.result
     if result is None:

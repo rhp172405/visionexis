@@ -1,6 +1,7 @@
 from datetime import datetime
 from io import StringIO
 import csv as csv_module
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,6 +11,13 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
+from auth import (
+    get_current_auth,
+    require_operator,
+    enforce_session_access,
+    enforce_assessment_access,
+    AuthContext,
+)
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -38,7 +46,11 @@ def _within_norm(task_type: str, accuracy: float | None, rt_ms: float | None) ->
 
 
 @router.get("", response_model=list[schemas.ReportSessionRow])
-def list_reports(db: Session = Depends(get_db)):
+def list_reports(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    require_operator(auth)
     rows = (
         db.query(models.TaskSession, models.Patient, models.TaskResult)
         .join(models.Patient, models.TaskSession.patient_id == models.Patient.id)
@@ -76,7 +88,11 @@ def list_reports(db: Session = Depends(get_db)):
 
 
 @router.get("/assessments", response_model=list[schemas.AssessmentReportRow])
-def list_assessment_reports(db: Session = Depends(get_db)):
+def list_assessment_reports(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
+    require_operator(auth)
     """Reports grouped by assessment (patient visit), combining all 3 task modules."""
     rows = (
         db.query(models.Assessment, models.Patient)
@@ -138,10 +154,15 @@ def list_assessment_reports(db: Session = Depends(get_db)):
 
 
 @router.get("/{session_id}/csv")
-def export_csv(session_id: str, db: Session = Depends(get_db)):
+def export_csv(
+    session_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
     session = db.get(models.TaskSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    enforce_session_access(auth, session.id, session.patient_id)
 
     patient = db.get(models.Patient, session.patient_id)
     events = (
@@ -237,10 +258,15 @@ def _gaze_stats(db: Session, session: models.TaskSession | None):
 
 
 @router.get("/{session_id}/pdf")
-def export_pdf(session_id: str, db: Session = Depends(get_db)):
+def export_pdf(
+    session_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
     session = db.get(models.TaskSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    enforce_session_access(auth, session.id, session.patient_id)
 
     patient = db.get(models.Patient, session.patient_id)
     task_result = session.result
@@ -273,11 +299,16 @@ def export_pdf(session_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/assessment/{assessment_id}", response_model=schemas.CombinedAssessmentReport)
-def get_assessment_report(assessment_id: str, db: Session = Depends(get_db)):
+def get_assessment_report(
+    assessment_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
     """Combined assessment report details spanning all 3 task modules."""
     assessment = db.get(models.Assessment, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    enforce_assessment_access(auth, assessment.id, assessment.patient_id)
 
     patient = db.get(models.Patient, assessment.patient_id)
 
@@ -370,15 +401,21 @@ def get_assessment_report(assessment_id: str, db: Session = Depends(get_db)):
         any_flagged=any_flagged,
         tasks=task_details,
         disclaimer=DISCLAIMER,
+        baseline_assessment=json.loads(assessment.baseline_json) if assessment.baseline_json else None,
     )
 
 
 @router.get("/assessment/{assessment_id}/pdf")
-def export_assessment_pdf(assessment_id: str, db: Session = Depends(get_db)):
+def export_assessment_pdf(
+    assessment_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+):
     """Combined PDF report covering all 3 task modules for one patient visit."""
     assessment = db.get(models.Assessment, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    enforce_assessment_access(auth, assessment.id, assessment.patient_id)
 
     patient = db.get(models.Patient, assessment.patient_id)
     completed_sessions = [s for s in assessment.task_sessions if s.status == "completed"]

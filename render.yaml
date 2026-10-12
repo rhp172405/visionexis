@@ -1,28 +1,35 @@
 services:
   - type: web
-    name: visionexis-backend
+    name: visionexis-staging-backend
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
       - key: DATABASE_URL
         fromDatabase:
-          name: visionexis-postgres
+          name: visionexis-staging-postgres
           property: connectionString
       - key: CORS_ORIGINS
-        value: "http://localhost:5173,https://visionexis.vercel.app"
+        value: "https://visionexis.vercel.app"
       - key: SEED_DEMO_DATA
         value: "false"
       - key: ENVIRONMENT
-        value: production
+        value: staging
+      - key: AUTH_REQUIRED
+        value: "true"
+      - key: OPERATOR_API_KEY
+        generateValue: true
+      - key: AUTH_SECRET_KEY
+        generateValue: true
 
 databases:
-  - name: visionexis-postgres
-    databaseName: eyecog
-    user: visionexis
+  - name: visionexis-staging-postgres
+    databaseName: eyecog_staging
+    user: visionexis_staging
     plan: free
+
