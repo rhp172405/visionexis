@@ -144,6 +144,112 @@ test("Memory Task Protocol generates exact 20 study + 40 recognition trials", ()
 });
 
 // ------------------------------------------------------------------
+// Coordinate Helper Functions (mirroring coordinates.ts)
+// ------------------------------------------------------------------
+function windowNormToContainer(normX, normY, containerRect, winWidth = 1920, winHeight = 1080) {
+  const screenX = normX * winWidth;
+  const screenY = normY * winHeight;
+  return {
+    x: Math.round(screenX - containerRect.left),
+    y: Math.round(screenY - containerRect.top),
+  };
+}
+
+function containerToWindowNorm(containerRelX, containerRelY, containerRect, winWidth = 1920, winHeight = 1080) {
+  const screenX = containerRect.left + containerRelX;
+  const screenY = containerRect.top + containerRelY;
+  return {
+    normX: Math.max(0, Math.min(1, screenX / (winWidth || 1))),
+    normY: Math.max(0, Math.min(1, screenY / (winHeight || 1))),
+  };
+}
+
+function targetToWindowNorm(targetNormX, targetNormY, containerRect, winWidth = 1920, winHeight = 1080) {
+  const containerRelX = targetNormX * containerRect.width;
+  const containerRelY = targetNormY * containerRect.height;
+  return containerToWindowNorm(containerRelX, containerRelY, containerRect, winWidth, winHeight);
+}
+
+// ------------------------------------------------------------------
+// Test 4: Boundary Conditions: Screen Corners (0,0) and (1,1)
+// ------------------------------------------------------------------
+test("Boundary Condition: Screen corners map accurately relative to container", () => {
+  const winW = 1920;
+  const winH = 1080;
+  const containerRect = { left: 500, top: 200, width: 800, height: 600 };
+
+  // Top-left corner of the window (0, 0)
+  const ptTopLeft = windowNormToContainer(0.0, 0.0, containerRect, winW, winH);
+  assert.strictEqual(ptTopLeft.x, -500, "Window top-left X relative to container must be -500");
+  assert.strictEqual(ptTopLeft.y, -200, "Window top-left Y relative to container must be -200");
+
+  // Bottom-right corner of the window (1, 1)
+  const ptBottomRight = windowNormToContainer(1.0, 1.0, containerRect, winW, winH);
+  assert.strictEqual(ptBottomRight.x, 1920 - 500, "Window bottom-right X relative to container must be 1420");
+  assert.strictEqual(ptBottomRight.y, 1080 - 200, "Window bottom-right Y relative to container must be 880");
+});
+
+// ------------------------------------------------------------------
+// Test 5: Calibration Target Window Normalization & Inversion
+// ------------------------------------------------------------------
+test("Round-trip Coordinate Conversion: targetToWindowNorm -> windowNormToContainer", () => {
+  const resolutions = [
+    { w: 1920, h: 1080 },
+    { w: 1366, h: 768 },
+    { w: 2560, h: 1440 },
+  ];
+
+  for (const { w, h } of resolutions) {
+    const containerRect = {
+      left: Math.round((w - 800) / 2),
+      top: Math.round((h - 450) / 2),
+      width: 800,
+      height: 450,
+    };
+
+    // Test 9 calibration positions
+    const targets = [
+      { normX: 0.15, normY: 0.15 },
+      { normX: 0.50, normY: 0.50 },
+      { normX: 0.85, normY: 0.85 },
+    ];
+
+    for (const tgt of targets) {
+      const winNorm = targetToWindowNorm(tgt.normX, tgt.normY, containerRect, w, h);
+      const reconstructed = windowNormToContainer(winNorm.normX, winNorm.normY, containerRect, w, h);
+
+      const expectedContainerX = Math.round(tgt.normX * containerRect.width);
+      const expectedContainerY = Math.round(tgt.normY * containerRect.height);
+
+      assert.strictEqual(
+        reconstructed.x,
+        expectedContainerX,
+        `Reconstructed X (${reconstructed.x}) must match expected (${expectedContainerX}) at ${w}x${h}`
+      );
+      assert.strictEqual(
+        reconstructed.y,
+        expectedContainerY,
+        `Reconstructed Y (${reconstructed.y}) must match expected (${expectedContainerY}) at ${w}x${h}`
+      );
+    }
+  }
+});
+
+// ------------------------------------------------------------------
+// Test 6: Container Edge Clamping for Out-of-Bounds Gaze
+// ------------------------------------------------------------------
+test("Container to Window Normalization clamps out-of-bounds coordinates", () => {
+  const containerRect = { left: 0, top: 0, width: 1000, height: 1000 };
+  const negativePoint = containerToWindowNorm(-100, -50, containerRect, 1000, 1000);
+  assert.strictEqual(negativePoint.normX, 0, "Negative X must be clamped to 0");
+  assert.strictEqual(negativePoint.normY, 0, "Negative Y must be clamped to 0");
+
+  const overflowPoint = containerToWindowNorm(1200, 1500, containerRect, 1000, 1000);
+  assert.strictEqual(overflowPoint.normX, 1, "Overflow X must be clamped to 1");
+  assert.strictEqual(overflowPoint.normY, 1, "Overflow Y must be clamped to 1");
+});
+
+// ------------------------------------------------------------------
 // Summary
 // ------------------------------------------------------------------
 console.log("\n==================================================================");

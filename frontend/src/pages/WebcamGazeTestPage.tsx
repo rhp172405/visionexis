@@ -11,6 +11,7 @@ import {
   type CalibrationTarget,
   type ValidationSummary,
 } from "@/lib/webcam/calibration";
+import { targetToWindowNorm, windowNormToContainer } from "@/lib/webcam/coordinates";
 import {
   Camera,
   Crosshair,
@@ -202,8 +203,13 @@ export function WebcamGazeTestPage() {
   }, []);
 
   // Compute screen pixel coordinates relative to the bounded test viewport container
-  const pixelGazeX = currentGaze ? Math.round(currentGaze.normX * viewportDims.w) : 0;
-  const pixelGazeY = currentGaze ? Math.round(currentGaze.normY * viewportDims.h) : 0;
+  const containerGaze = currentGaze && viewportRef.current
+    ? windowNormToContainer(currentGaze.normX, currentGaze.normY, viewportRef.current.getBoundingClientRect())
+    : currentGaze
+    ? { x: Math.round(currentGaze.normX * viewportDims.w), y: Math.round(currentGaze.normY * viewportDims.h) }
+    : { x: 0, y: 0 };
+  const pixelGazeX = containerGaze.x;
+  const pixelGazeY = containerGaze.y;
 
   // Compute distance from currently selected test target
   const targetPxX = selectedTarget ? Math.round(selectedTarget.normX * viewportDims.w) : 0;
@@ -225,7 +231,8 @@ export function WebcamGazeTestPage() {
 
     if (pointIndex >= CALIBRATION_POINTS_9.length) {
       // Finished 9 calibration points -> train Model X & Model Y
-      const model = trainCalibrationModel(collectedCalibSamples);
+      const win = typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : viewportDims;
+      const model = trainCalibrationModel(collectedCalibSamples, win.w, win.h);
       if (model) {
         setCalibrationModel(model);
         // Transition to 5-point validation phase
@@ -258,10 +265,27 @@ export function WebcamGazeTestPage() {
         const { featuresX, featuresY } = extractRegressionFeatures(feat);
         const meanRelX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
         const meanRelY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
+
+        let sampleTargetX = currentTarget.normX;
+        let sampleTargetY = currentTarget.normY;
+        let sampleTargetPxX = Math.round(currentTarget.normX * viewportDims.w);
+        let sampleTargetPxY = Math.round(currentTarget.normY * viewportDims.h);
+
+        if (viewportRef.current) {
+          const rect = viewportRef.current.getBoundingClientRect();
+          const winNorm = targetToWindowNorm(currentTarget.normX, currentTarget.normY, rect);
+          sampleTargetX = winNorm.normX;
+          sampleTargetY = winNorm.normY;
+          sampleTargetPxX = Math.round(rect.left + currentTarget.normX * rect.width);
+          sampleTargetPxY = Math.round(rect.top + currentTarget.normY * rect.height);
+        }
+
         targetSamples.push({
           targetId: currentTarget.id,
-          targetX: currentTarget.normX,
-          targetY: currentTarget.normY,
+          targetX: sampleTargetX,
+          targetY: sampleTargetY,
+          targetPxX: sampleTargetPxX,
+          targetPxY: sampleTargetPxY,
           leftRelativeX: feat.leftIrisX,
           leftRelativeY: feat.leftIrisY,
           rightRelativeX: feat.rightIrisX,
@@ -298,11 +322,12 @@ export function WebcamGazeTestPage() {
       // Completed validation -> run statistical validation
       const model = useGazeStore.getState().calibrationModel;
       if (model && validationSamplesMap.length > 0) {
+        const win = typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : viewportDims;
         const summary = validateCalibrationModel(
           validationSamplesMap,
           model,
-          viewportDims.w,
-          viewportDims.h
+          win.w,
+          win.h
         );
         setValidationSummary(summary);
         setCalibrationModel({ ...model, validation: summary });
@@ -329,10 +354,27 @@ export function WebcamGazeTestPage() {
         const { featuresX, featuresY } = extractRegressionFeatures(feat);
         const meanRelX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
         const meanRelY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
+
+        let sampleTargetX = currentValTarget.normX;
+        let sampleTargetY = currentValTarget.normY;
+        let sampleTargetPxX = Math.round(currentValTarget.normX * viewportDims.w);
+        let sampleTargetPxY = Math.round(currentValTarget.normY * viewportDims.h);
+
+        if (viewportRef.current) {
+          const rect = viewportRef.current.getBoundingClientRect();
+          const winNorm = targetToWindowNorm(currentValTarget.normX, currentValTarget.normY, rect);
+          sampleTargetX = winNorm.normX;
+          sampleTargetY = winNorm.normY;
+          sampleTargetPxX = Math.round(rect.left + currentValTarget.normX * rect.width);
+          sampleTargetPxY = Math.round(rect.top + currentValTarget.normY * rect.height);
+        }
+
         valTargetSamples.push({
           targetId: currentValTarget.id,
-          targetX: currentValTarget.normX,
-          targetY: currentValTarget.normY,
+          targetX: sampleTargetX,
+          targetY: sampleTargetY,
+          targetPxX: sampleTargetPxX,
+          targetPxY: sampleTargetPxY,
           leftRelativeX: feat.leftIrisX,
           leftRelativeY: feat.leftIrisY,
           rightRelativeX: feat.rightIrisX,
@@ -831,8 +873,8 @@ export function WebcamGazeTestPage() {
             <div
               className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 transition-transform duration-75 ease-out"
               style={{
-                left: `${currentGaze.normX * 100}%`,
-                top: `${currentGaze.normY * 100}%`,
+                left: `${pixelGazeX}px`,
+                top: `${pixelGazeY}px`,
               }}
             >
               <div className="relative flex h-8 w-8 items-center justify-center">

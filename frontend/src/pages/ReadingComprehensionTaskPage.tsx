@@ -43,6 +43,7 @@ import {
   globalTaskEventManager,
 } from "@/lib/webcam/gazeEvents";
 import { ReadingVisualizer } from "@/components/tasks/ReadingVisualizer";
+import { windowNormToContainer } from "@/lib/webcam/coordinates";
 import { completeSession, createSession, endAssessment, getAssessment } from "@/lib/api";
 
 type Phase = "intro" | "reading" | "questions" | "results";
@@ -223,10 +224,9 @@ export function ReadingComprehensionTaskPage() {
     let gy = 0;
     if (textContainerRef.current) {
       const rect = textContainerRef.current.getBoundingClientRect();
-      const screenX = currentGaze.normX * window.innerWidth;
-      const screenY = currentGaze.normY * window.innerHeight;
-      gx = Math.round(screenX - rect.left);
-      gy = Math.round(screenY - rect.top);
+      const pt = windowNormToContainer(currentGaze.normX, currentGaze.normY, rect);
+      gx = pt.x;
+      gy = pt.y;
     } else {
       gx = Math.round(currentGaze.normX * CONTAINER_WIDTH);
       gy = Math.round(currentGaze.normY * CONTAINER_HEIGHT);

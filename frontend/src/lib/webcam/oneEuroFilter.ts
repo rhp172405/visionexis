@@ -64,8 +64,9 @@ export class OneEuroFilter {
   }
 
   filter(value: number, timestampMs: number): number {
-    if (this.lastTime === null) {
+    if (this.lastTime === null || timestampMs - this.lastTime > 500) {
       this.lastTime = timestampMs;
+      this.dxFilter.reset();
       return this.xFilter.filter(value, 1.0);
     }
 

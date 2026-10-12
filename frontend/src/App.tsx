@@ -12,6 +12,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { WebcamGazeTestPage } from "@/pages/WebcamGazeTestPage";
 import { CalibrationPage } from "@/pages/CalibrationPage";
 import { GazeValidationPage } from "@/pages/GazeValidationPage";
+import { BaselineVisualAssessmentPage } from "@/pages/BaselineVisualAssessmentPage";
 import { ResearchDashboardPage } from "@/pages/ResearchDashboardPage";
 import { ResearchReportPage } from "@/pages/ResearchReportPage";
 import { PilotStudyPage } from "@/pages/PilotStudyPage";
@@ -23,6 +24,7 @@ export default function App() {
       <Route element={<DashboardLayout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/new-session" element={<NewSessionPage />} />
+        <Route path="/baseline-assessment" element={<BaselineVisualAssessmentPage />} />
         <Route path="/pilot-study" element={<PilotStudyPage />} />
         <Route path="/pilot-report" element={<PilotReportPage />} />
         <Route path="/assessment" element={<AssessmentHubPage />} />

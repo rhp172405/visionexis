@@ -7,6 +7,7 @@ import { globalWebcamManager } from "@/lib/webcam/webcamManager";
 
 export const ALLOWED_PATHS = new Set([
   "/assessment",
+  "/baseline-assessment",
   "/tasks/visual-search",
   "/tasks/memory-recognition",
   "/tasks/memory",

@@ -17,6 +17,9 @@ const testFiles = [
   "src/test_phase12_cohort_validation.mjs",
   "src/test_task_coordinate_alignment.mjs",
   "src/test_assessment_workflow.mjs",
+  "src/test_mbt_integrated_analysis.mjs",
+  "src/test_full_integrated_e2e.mjs",
+  "src/test_operator_access_and_remediation.mjs",
 ];
 
 let suitesPassed = 0;

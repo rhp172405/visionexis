@@ -13,6 +13,7 @@ import {
   type CalibrationPointSample,
   type CalibrationTarget,
 } from "@/lib/webcam/calibration";
+import { targetToWindowNorm } from "@/lib/webcam/coordinates";
 import { useWebcamTracker } from "@/hooks/useWebcamTracker";
 
 const SAMPLES_PER_POINT = 20;
@@ -46,6 +47,8 @@ export function WebcamCalibrationModal() {
   const currentTargetRef = useRef<CalibrationTarget>(CALIBRATION_POINTS_9[0]);
   const isCollectingRef = useRef(false);
   const settleTimeoutRef = useRef<number | null>(null);
+  const modalBodyRef = useRef<HTMLDivElement | null>(null);
+  const lastSampleTimestampRef = useRef<number>(0);
 
   // Auto-start camera when calibration modal opens
   useEffect(() => {
@@ -89,17 +92,34 @@ export function WebcamCalibrationModal() {
   // Collect samples on each feature update from useWebcamTracker
   useEffect(() => {
     if (step !== "calibrating" || !isCollectingRef.current || !lastFeatures) return;
-    if (lastFeatures.isBlink || !faceDetected) return;
+    if (lastFeatures.isBlink || !faceDetected || lastFeatures.timestamp === lastSampleTimestampRef.current) return;
+    lastSampleTimestampRef.current = lastFeatures.timestamp;
 
     const target = currentTargetRef.current;
     const { featuresX, featuresY } = extractRegressionFeatures(lastFeatures);
     const meanRelX = (lastFeatures.leftIrisX + lastFeatures.rightIrisX) / 2.0;
     const meanRelY = (lastFeatures.leftIrisY + lastFeatures.rightIrisY) / 2.0;
 
+    let sampleTargetX = target.normX;
+    let sampleTargetY = target.normY;
+    let sampleTargetPxX = 0;
+    let sampleTargetPxY = 0;
+
+    if (modalBodyRef.current) {
+      const rect = modalBodyRef.current.getBoundingClientRect();
+      const winNorm = targetToWindowNorm(target.normX, target.normY, rect);
+      sampleTargetX = winNorm.normX;
+      sampleTargetY = winNorm.normY;
+      sampleTargetPxX = Math.round(rect.left + target.normX * rect.width);
+      sampleTargetPxY = Math.round(rect.top + target.normY * rect.height);
+    }
+
     samplesRef.current.push({
       targetId: target.id,
-      targetX: target.normX,
-      targetY: target.normY,
+      targetX: sampleTargetX,
+      targetY: sampleTargetY,
+      targetPxX: sampleTargetPxX,
+      targetPxY: sampleTargetPxY,
       leftRelativeX: lastFeatures.leftIrisX,
       leftRelativeY: lastFeatures.leftIrisY,
       rightRelativeX: lastFeatures.rightIrisX,
@@ -112,7 +132,7 @@ export function WebcamCalibrationModal() {
       faceCenterY: lastFeatures.faceCenterY,
       featuresX,
       featuresY,
-      timestamp: performance.now(),
+      timestamp: lastFeatures.timestamp,
     });
 
     const samplesForCurrentPoint = samplesRef.current.filter((s) => s.targetId === target.id).length;
@@ -132,7 +152,8 @@ export function WebcamCalibrationModal() {
   }, [lastFeatures, step, pointIndex, faceDetected]);
 
   const finishCalibration = () => {
-    const model = trainCalibrationModel(samplesRef.current);
+    const win = typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : { w: 1920, h: 1080 };
+    const model = trainCalibrationModel(samplesRef.current, win.w, win.h);
     if (model) {
       setCalibrationModel(model);
       setQualityScore(model.qualityScore);
@@ -177,7 +198,7 @@ export function WebcamCalibrationModal() {
         </div>
 
         {/* Main Body */}
-        <div className="relative flex-1 bg-slate-50">
+        <div ref={modalBodyRef} className="relative flex-1 bg-slate-50">
           {/* STEP 1: INTRO */}
           {step === "intro" && (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center">

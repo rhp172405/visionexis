@@ -23,6 +23,8 @@ export interface CalibrationSample {
   targetY: number; // normalized target Y (0..1)
   targetPxX?: number;
   targetPxY?: number;
+  predictedPxX?: number;
+  predictedPxY?: number;
   leftRelativeX: number;
   leftRelativeY: number;
   rightRelativeX: number;
@@ -117,17 +119,15 @@ export const STORAGE_KEY = "visionexis_webcam_calibration_v1";
 export const FEATURE_CONFIG = {
   featuresX: [
     "bias",
-    "leftRelativeX - 0.5",
-    "rightRelativeX - 0.5",
     "meanRelativeX - 0.5",
+    "leftDiffRightX",
     "headYaw",
     "faceCenterX - 0.5",
   ],
   featuresY: [
     "bias",
-    "leftRelativeY - 0.5",
-    "rightRelativeY - 0.5",
     "meanRelativeY - 0.5",
+    "leftDiffRightY",
     "headPitch",
     "faceCenterY - 0.5",
   ],
@@ -135,7 +135,7 @@ export const FEATURE_CONFIG = {
 
 /**
  * Extract normalized eye & head-pose feature vectors for Model X and Model Y.
- * Exact same feature formulation is used during calibration training and live prediction.
+ * Uses conjugate gaze shifts and orthogonal differential terms to prevent collinearity.
  */
 export function extractRegressionFeatures(feat: {
   leftIrisX: number;
@@ -150,24 +150,22 @@ export function extractRegressionFeatures(feat: {
   const meanX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
   const meanY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
 
-  // Horizontal Feature Vector for Model X
+  // Horizontal Feature Vector for Model X (orthogonal, well-conditioned)
   const featuresX = [
-    1.0,                    // 0: Bias term
-    feat.leftIrisX - 0.5,   // 1: Left eye relative iris X
-    feat.rightIrisX - 0.5,  // 2: Right eye relative iris X
-    meanX - 0.5,            // 3: Mean relative iris X
-    feat.headYaw,           // 4: Head yaw proxy
-    feat.faceCenterX - 0.5, // 5: Lateral face displacement
+    1.0,                              // 0: Bias term
+    meanX - 0.5,                      // 1: Conjugate horizontal iris shift
+    feat.leftIrisX - feat.rightIrisX, // 2: Horizontal vergence / asymmetry
+    feat.headYaw,                     // 3: Head yaw proxy
+    feat.faceCenterX - 0.5,           // 4: Lateral face displacement
   ];
 
-  // Vertical Feature Vector for Model Y
+  // Vertical Feature Vector for Model Y (orthogonal, well-conditioned)
   const featuresY = [
-    1.0,                    // 0: Bias term
-    feat.leftIrisY - 0.5,   // 1: Left eye relative iris Y
-    feat.rightIrisY - 0.5,  // 2: Right eye relative iris Y
-    meanY - 0.5,            // 3: Mean relative iris Y
-    feat.headPitch,         // 4: Head pitch proxy
-    feat.faceCenterY - 0.5, // 5: Vertical face displacement
+    1.0,                              // 0: Bias term
+    meanY - 0.5,                      // 1: Conjugate vertical iris shift
+    feat.leftIrisY - feat.rightIrisY, // 2: Vertical eye differential
+    feat.headPitch,                   // 3: Head pitch proxy
+    feat.faceCenterY - 0.5,           // 4: Vertical face displacement
   ];
 
   return { featuresX, featuresY };
@@ -180,7 +178,7 @@ export function extractRegressionFeatures(feat: {
 export function solveRidgeRegression(
   X: number[][],
   Y: number[],
-  lambda: number = 0.005
+  lambda: number = 0.002
 ): number[] {
   const n = X.length;
   if (n === 0) return [];
@@ -309,8 +307,8 @@ export function trainCalibrationModel(
   const targetX = filteredSamples.map((s) => s.targetX);
   const targetY = filteredSamples.map((s) => s.targetY);
 
-  const weightsX = solveRidgeRegression(X_features, targetX, 0.005);
-  const weightsY = solveRidgeRegression(Y_features, targetY, 0.005);
+  const weightsX = solveRidgeRegression(X_features, targetX, 0.002);
+  const weightsY = solveRidgeRegression(Y_features, targetY, 0.002);
 
   if (weightsX.length === 0 || weightsY.length === 0) return null;
 
@@ -389,8 +387,8 @@ export function estimateGazeNorm(
   const cx = meanX - 0.5;
   const cy = meanY - 0.5;
 
-  const normX = clamp(0.5 - cx * 3.5 - feat.headYaw * 1.2, 0.02, 0.98);
-  const normY = clamp(0.5 + cy * 3.2 + feat.headPitch * 1.2, 0.02, 0.98);
+  const normX = clamp(0.5 - cx * 3.6 - feat.headYaw * 1.2, 0.02, 0.98);
+  const normY = clamp(0.5 + cy * 3.6 + feat.headPitch * 1.2, 0.02, 0.98);
 
   return { normX, normY };
 }
@@ -419,10 +417,17 @@ export function validateCalibrationModel(
     const predNormX = clamp(dot(avgXFeat, model.weightsX), 0.0, 1.0);
     const predNormY = clamp(dot(avgYFeat, model.weightsY), 0.0, 1.0);
 
-    const targetPxX = Math.round(target.normX * viewportWidth);
-    const targetPxY = Math.round(target.normY * viewportHeight);
-    const predictedPxX = Math.round(predNormX * viewportWidth);
-    const predictedPxY = Math.round(predNormY * viewportHeight);
+    const expectedNormX = target.normX;
+    const expectedNormY = target.normY;
+    const targetPxX = samples[0]?.targetPxX ?? Math.round(expectedNormX * viewportWidth);
+    const targetPxY = samples[0]?.targetPxY ?? Math.round(expectedNormY * viewportHeight);
+    const hasPredictedPx = samples.some((s) => s.predictedPxX != null && s.predictedPxY != null);
+    const predictedPxX = hasPredictedPx
+      ? Math.round(computeMedian(samples.filter((s) => s.predictedPxX != null).map((s) => s.predictedPxX!)))
+      : Math.round(predNormX * viewportWidth);
+    const predictedPxY = hasPredictedPx
+      ? Math.round(computeMedian(samples.filter((s) => s.predictedPxY != null).map((s) => s.predictedPxY!)))
+      : Math.round(predNormY * viewportHeight);
 
     const hErr = Math.abs(predictedPxX - targetPxX);
     const vErr = Math.abs(predictedPxY - targetPxY);

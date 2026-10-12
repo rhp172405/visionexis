@@ -258,6 +258,140 @@ export interface CombinedAssessmentReport {
   avg_accuracy: number | null;
   any_flagged: boolean;
   tasks: CombinedTaskDetail[];
+  baseline_assessment?: BaselineVisualAssessment | null;
   disclaimer: string;
+}
+
+export interface TriadVergence {
+  blur?: number | null;
+  break?: number | null;
+  recovery?: number | null;
+}
+
+export interface BaselineVisualAssessment {
+  id?: string;
+  assessment_id: string;
+  patient_id: string;
+  recorded_at: string;
+  examiner_name?: string | null;
+
+  // Visual Acuity
+  distance_va_od?: string | null;
+  distance_va_os?: string | null;
+  near_va_ou?: string | null;
+  va_notation?: "Snellen_fraction" | "Decimal" | "LogMAR";
+  va_correction_status?: "uncorrected" | "habitual_correction" | "best_corrected";
+
+  // Refractive Error / Correction
+  refractive_error_od?: string | null;
+  refractive_error_os?: string | null;
+  spectacle_or_contact_used?: boolean | null;
+
+  // Binocular & Accommodative Parameters
+  // NFB: Negative Fusional Break (NFV Break Point during Base-In vergence testing)
+  nfb_distance_break_pd?: number | null;
+  nfb_near_break_pd?: number | null;
+  nfv_distance_triad?: TriadVergence | null;
+  nfv_near_triad?: TriadVergence | null;
+
+  // PFV: Positive Fusional Vergence (Base-Out vergence testing)
+  pfv_distance_break_pd?: number | null;
+  pfv_near_break_pd?: number | null;
+  pfv_distance_triad?: TriadVergence | null;
+  pfv_near_triad?: TriadVergence | null;
+
+  // NPC: Near Point of Convergence (cm)
+  npc_break_cm?: number | null;
+  npc_recovery_cm?: number | null;
+  npc_target?: "accommodative_target" | "penlight_red_glass";
+
+  // NPA: Near Point of Accommodation (Diopters or cm)
+  npa_amplitude_od_d?: number | null;
+  npa_amplitude_os_d?: number | null;
+  npa_amplitude_ou_d?: number | null;
+  npa_method?: "push_up" | "minus_lens";
+
+  // AC/A Ratio
+  ac_a_ratio?: string | null;
+  ac_a_method?: "gradient" | "calculated_heterophoria";
+
+  // Phoria (Modified Thorington / MBT)
+  phoria_distance_pd?: number | null;
+  phoria_distance_direction?: "ortho" | "exo" | "eso" | "hyper";
+  phoria_near_pd?: number | null;
+  phoria_near_direction?: "ortho" | "exo" | "eso" | "hyper";
+  phoria_method?: "modified_thorington" | "cover_test" | "von_graefe";
+
+  // Additional vergence/accommodation facility
+  vergence_facility_cpm?: number | null;
+  accommodative_facility_ou_cpm?: number | null;
+
+  // Study-specific notes & omissions
+  clinician_notes?: string | null;
+  unmeasured_fields?: string[];
+  is_server_synced?: boolean;
+}
+
+export interface VisualNormativeCriterion {
+  parameter: string;
+  measuredValue: string | number | null;
+  unit: string;
+  normativeRange: string;
+  source: string;
+  status: "within_criterion" | "outside_criterion" | "unmeasured" | "not_applicable";
+  clinicalNote?: string;
+}
+
+export interface CrossDomainComparison {
+  id: string;
+  hypothesis: string;
+  baselineParameter: string;
+  baselineValue: string | number | null;
+  taskOutcome: string;
+  taskValue: string | number | null;
+  taskName: "Visual Search" | "Memory & Recognition" | "Reading & Comprehension";
+  sampleCount: number;
+  analysisMethod: "Individual Descriptive Comparison" | "Pearson Correlation" | "Spearman Rank Correlation";
+  associationDirection?: "positive" | "negative" | "neutral" | "uncalculated";
+  associationStrength?: string;
+  notesAndLimitations: string;
+  isStatisticallyEvaluated: boolean;
+}
+
+export interface IntegratedVisualCognitiveProfile {
+  assessment_id: string;
+  patient_id: string;
+  baselineCriteria: VisualNormativeCriterion[];
+  crossDomainComparisons: CrossDomainComparison[];
+  taskProfiles: {
+    visualSearch: {
+      performanceSummary: string;
+      accuracyPct: number | null;
+      rtMs: number | null;
+      gazeTrackingQuality: string;
+      usableDataPct: number | null;
+      notes: string;
+    };
+    memoryRecognition: {
+      performanceSummary: string;
+      accuracyPct: number | null;
+      dPrime: number | null;
+      criterionC: number | null;
+      gazeTrackingQuality: string;
+      usableDataPct: number | null;
+      notes: string;
+    };
+    readingComprehension: {
+      performanceSummary: string;
+      comprehensionPct: number | null;
+      readingSpeedWpm: number | null;
+      regressionCount: number | null;
+      gazeTrackingQuality: string;
+      usableDataPct: number | null;
+      notes: string;
+    };
+  };
+  overallResearchInterpretation: string;
+  limitationsNotice: string;
 }
 

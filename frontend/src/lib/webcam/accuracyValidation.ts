@@ -97,8 +97,10 @@ export interface ComprehensiveValidationReport {
     trackingAvailabilityPct: number;
   };
 
-  // Qualification
-  calibrationStatus: "CALIBRATION VALIDATED" | "CALIBRATION NEEDS IMPROVEMENT";
+  // Qualification & Tiers
+  calibrationStatus: "CALIBRATION VALIDATED" | "CALIBRATION NEEDS IMPROVEMENT" | string;
+  qualityTier?: "OPTIMAL" | "ACCEPTABLE_MACRO_AOI" | "SPATIAL_EXCLUDED";
+  provisionalMacroAoiPass?: boolean;
   qualityScorePct: number;
   notes: string[];
 }

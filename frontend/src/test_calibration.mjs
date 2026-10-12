@@ -100,18 +100,16 @@ function extractRegressionFeatures(feat) {
 
   const featuresX = [
     1.0,
-    feat.leftIrisX - 0.5,
-    feat.rightIrisX - 0.5,
     meanX - 0.5,
+    feat.leftIrisX - feat.rightIrisX,
     feat.headYaw,
     feat.faceCenterX - 0.5,
   ];
 
   const featuresY = [
     1.0,
-    feat.leftIrisY - 0.5,
-    feat.rightIrisY - 0.5,
     meanY - 0.5,
+    feat.leftIrisY - feat.rightIrisY,
     feat.headPitch,
     feat.faceCenterY - 0.5,
   ];

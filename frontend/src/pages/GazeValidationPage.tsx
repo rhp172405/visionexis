@@ -6,6 +6,7 @@ import {
   type CalibrationTarget,
   type CalibrationProfile,
 } from "@/lib/webcam/calibration";
+import { windowNormToContainer } from "@/lib/webcam/coordinates";
 import {
   evaluate5PointAccuracy,
   calculateCenterStability,
@@ -73,8 +74,13 @@ export function GazeValidationPage() {
   }, []);
 
   // Compute pixel gaze
-  const pixelGazeX = currentGaze ? Math.round(currentGaze.normX * viewportDims.w) : 0;
-  const pixelGazeY = currentGaze ? Math.round(currentGaze.normY * viewportDims.h) : 0;
+  const containerGaze = currentGaze && viewportRef.current
+    ? windowNormToContainer(currentGaze.normX, currentGaze.normY, viewportRef.current.getBoundingClientRect())
+    : currentGaze
+    ? { x: Math.round(currentGaze.normX * viewportDims.w), y: Math.round(currentGaze.normY * viewportDims.h) }
+    : { x: 0, y: 0 };
+  const pixelGazeX = containerGaze.x;
+  const pixelGazeY = containerGaze.y;
 
   // -------------------------------------------------------------------------
   // Event Detectors & Raw Gaze Buffer
@@ -105,8 +111,13 @@ export function GazeValidationPage() {
     if (!currentGaze || !lastFeatures || !isCameraActive) return;
 
     const t = currentGaze.timestamp;
-    const gx = Math.round(currentGaze.normX * viewportDims.w);
-    const gy = Math.round(currentGaze.normY * viewportDims.h);
+    let gx = Math.round(currentGaze.normX * viewportDims.w);
+    let gy = Math.round(currentGaze.normY * viewportDims.h);
+    if (viewportRef.current) {
+      const pt = windowNormToContainer(currentGaze.normX, currentGaze.normY, viewportRef.current.getBoundingClientRect());
+      gx = pt.x;
+      gy = pt.y;
+    }
 
     // Update detectors
     fixationDetectorRef.current?.addSample(gx, gy, t, currentGaze.confidence, currentGaze.isBlink);
@@ -213,10 +224,18 @@ export function GazeValidationPage() {
       const isDetected = useGazeStore.getState().faceDetected && useGazeStore.getState().eyesDetected;
 
       if (gaze && feat && isDetected && !gaze.isBlink && gaze.confidence >= 0.40) {
+        let gx = Math.round(gaze.normX * viewportDims.w);
+        let gy = Math.round(gaze.normY * viewportDims.h);
+        if (viewportRef.current) {
+          const pt = windowNormToContainer(gaze.normX, gaze.normY, viewportRef.current.getBoundingClientRect());
+          gx = pt.x;
+          gy = pt.y;
+        }
+
         pointBuffer.push({
           timestamp: gaze.timestamp,
-          gazeX: Math.round(gaze.normX * viewportDims.w),
-          gazeY: Math.round(gaze.normY * viewportDims.h),
+          gazeX: gx,
+          gazeY: gy,
           normalizedX: gaze.normX,
           normalizedY: gaze.normY,
           confidence: gaze.confidence,
@@ -264,8 +283,18 @@ export function GazeValidationPage() {
 
     setTimeout(() => {
       const endGaze = useGazeStore.getState().currentGaze;
-      const endX = endGaze ? Math.round(endGaze.normX * viewportDims.w) : startX;
-      const endY = endGaze ? Math.round(endGaze.normY * viewportDims.h) : startY;
+      let endX = startX;
+      let endY = startY;
+      if (endGaze) {
+        if (viewportRef.current) {
+          const pt = windowNormToContainer(endGaze.normX, endGaze.normY, viewportRef.current.getBoundingClientRect());
+          endX = pt.x;
+          endY = pt.y;
+        } else {
+          endX = Math.round(endGaze.normX * viewportDims.w);
+          endY = Math.round(endGaze.normY * viewportDims.h);
+        }
+      }
 
       const dx = endX - startX;
       const dy = endY - startY;
@@ -452,8 +481,21 @@ export function GazeValidationPage() {
     directionState.up.pass &&
     directionState.down.pass;
 
-  const isAccuracyAcceptable = fivePointResults ? fivePointResults.maePx <= 65 : true;
-  const isOverallValidated = isAccuracyAcceptable && mouseInfluenceRating === "NONE";
+  const mae = fivePointResults?.maePx ?? 0;
+  const isOptimalCalibration = fivePointResults ? mae <= 65 : true;
+  const isMacroAoiEligible = fivePointResults ? mae <= 100 : true;
+  const isMouseIndependent = mouseInfluenceRating === "NONE";
+
+  // Distinct quality tier classification:
+  // - "OPTIMAL": MAE <= 65 px (Nominal high-precision fit target)
+  // - "ACCEPTABLE_MACRO_AOI": 65 px < MAE <= 100 px (Provisional research gate for coarse AOIs)
+  // - "SPATIAL_EXCLUDED": MAE > 100 px (Protocol cutoff: spatial gaze excluded)
+  const qualityTier: "OPTIMAL" | "ACCEPTABLE_MACRO_AOI" | "SPATIAL_EXCLUDED" =
+    !fivePointResults || mae <= 65
+      ? "OPTIMAL"
+      : mae <= 100
+      ? "ACCEPTABLE_MACRO_AOI"
+      : "SPATIAL_EXCLUDED";
 
   // Build Comprehensive Report JSON
   const generateReport = (): ComprehensiveValidationReport => {
@@ -504,7 +546,13 @@ export function GazeValidationPage() {
         missingFrames: 20,
         trackingAvailabilityPct: 96.6,
       },
-      calibrationStatus: isOverallValidated ? "CALIBRATION VALIDATED" : "CALIBRATION NEEDS IMPROVEMENT",
+      calibrationStatus: isOptimalCalibration && isMouseIndependent
+        ? "CALIBRATION VALIDATED (OPTIMAL ≤65px)"
+        : isMacroAoiEligible && isMouseIndependent
+        ? "CALIBRATION VALIDATED (PROVISIONAL MACRO-AOI PASS ≤100px)"
+        : "CALIBRATION NEEDS IMPROVEMENT (SPATIAL EXCLUSION >100px)",
+      qualityTier,
+      provisionalMacroAoiPass: isMacroAoiEligible && isMouseIndependent,
       qualityScorePct: fivePointResults ? Math.max(10, Math.min(99, Math.round(100 - fivePointResults.maePx * 0.65))) : 90,
       notes: [
         "Webcam-based gaze estimation using normalized intra-eye landmark features.",
@@ -831,8 +879,8 @@ export function GazeValidationPage() {
                 <div
                   className="pointer-events-none absolute z-25 -translate-x-1/2 -translate-y-1/2 transition-transform duration-75 ease-out"
                   style={{
-                    left: `${currentGaze.normX * 100}%`,
-                    top: `${currentGaze.normY * 100}%`,
+                    left: `${pixelGazeX}px`,
+                    top: `${pixelGazeY}px`,
                   }}
                 >
                   <div className="relative flex h-8 w-8 items-center justify-center">
@@ -1344,15 +1392,21 @@ export function GazeValidationPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold text-slate-500">Qualification:</span>
+              <span className="text-xs font-semibold text-slate-500">Quality Tier:</span>
               <span
-                className={`rounded-full px-4 py-1 text-xs font-bold ${
-                  isOverallValidated
+                className={`rounded-full px-3 py-1 text-xs font-bold ${
+                  qualityTier === "OPTIMAL" && isMouseIndependent
                     ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                    : qualityTier === "ACCEPTABLE_MACRO_AOI" && isMouseIndependent
+                    ? "bg-blue-100 text-blue-800 border border-blue-300"
                     : "bg-amber-100 text-amber-800 border border-amber-300"
                 }`}
               >
-                {isOverallValidated ? "CALIBRATION VALIDATED ✓" : "CALIBRATION NEEDS IMPROVEMENT"}
+                {qualityTier === "OPTIMAL" && isMouseIndependent
+                  ? "OPTIMAL TARGET (≤65 px) ✓"
+                  : qualityTier === "ACCEPTABLE_MACRO_AOI" && isMouseIndependent
+                  ? "PROVISIONAL MACRO-AOI PASS (≤100 px)"
+                  : "SPATIAL EXCLUSION (>100 px)"}
               </span>
             </div>
           </div>
@@ -1408,6 +1462,16 @@ export function GazeValidationPage() {
                 {maxHeadDriftPx !== null ? `${maxHeadDriftPx} px` : "18 px"}
               </span>
             </div>
+          </div>
+
+          {/* Research Threshold Definitions Legend */}
+          <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600 space-y-1.5">
+            <div className="font-semibold text-slate-800 text-xs">Research Threshold Definitions:</div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px]">
+              <li><strong className="text-emerald-700">Optimal Calibration Target (MAE ≤ 65 px / ~1.7°):</strong> Technical quality benchmark under cooperative laboratory conditions.</li>
+              <li><strong className="text-blue-700">Provisional Macro-AOI Quality Pass (MAE ≤ 100 px / ~2.64°):</strong> Screening threshold permitting coarse quadrant and macro-AOI analysis. Requires empirical normative validation.</li>
+              <li><strong className="text-amber-700">Spatial Analysis Exclusion Cutoff (MAE &gt; 100 px / &gt;2.64°):</strong> Exceeds provisional threshold; spatial gaze data excluded per protocol (behavioral RT and accuracy metrics only).</li>
+            </ul>
           </div>
         </div>
       )}

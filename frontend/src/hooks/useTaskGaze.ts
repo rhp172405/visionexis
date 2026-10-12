@@ -11,6 +11,7 @@ import { useGazeStore } from "@/stores/gazeStore";
 import { globalWebcamManager } from "@/lib/webcam/webcamManager";
 import { useFixationDetection } from "@/hooks/useFixationDetection";
 import { SaccadeDetector } from "@/lib/webcam/saccadeDetection";
+import { windowNormToContainer } from "@/lib/webcam/coordinates";
 import type { GazePoint, DualModalityMetrics, SynchronizedSample } from "@/types";
 
 const SAMPLE_INTERVAL_MS = 33; // ~30 Hz synchronization interval
@@ -89,8 +90,9 @@ export function useTaskGaze({
     const initialGaze = useGazeStore.getState().currentGaze;
     if (initialGaze && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      const igx = initialGaze.normX * rect.width;
-      const igy = initialGaze.normY * rect.height;
+      const pt = windowNormToContainer(initialGaze.normX, initialGaze.normY, rect);
+      const igx = Math.max(0, Math.min(rect.width, pt.x));
+      const igy = Math.max(0, Math.min(rect.height, pt.y));
       lastGazePosRef.current = { x: igx, y: igy };
       setGazePos({ x: igx, y: igy });
     }
@@ -115,8 +117,9 @@ export function useTaskGaze({
       let isBlink = false;
 
       if (isCamActive && gaze) {
-        gx = Math.max(0, Math.min(rect.width, gaze.normX * rect.width));
-        gy = Math.max(0, Math.min(rect.height, gaze.normY * rect.height));
+        const pt = windowNormToContainer(gaze.normX, gaze.normY, rect);
+        gx = Math.max(0, Math.min(rect.width, pt.x));
+        gy = Math.max(0, Math.min(rect.height, pt.y));
         confidence = gaze.confidence;
         isBlink = gaze.isBlink;
 

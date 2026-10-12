@@ -52,8 +52,10 @@ class WebcamManager {
   private currentInferenceFps: number = 0;
   private currentCameraFps: number = 0;
   private currentInferenceTimeMs: number = 0;
+  private lastValidGazeX: number = 0.5;
+  private lastValidGazeY: number = 0.5;
 
-  private filter: Gaze2DFilter = new Gaze2DFilter({ minCutoff: 0.8, beta: 0.005 });
+  private filter: Gaze2DFilter = new Gaze2DFilter({ minCutoff: 0.8, beta: 0.008 });
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -187,6 +189,8 @@ class WebcamManager {
     stopCameraStream(this.videoElement, this.mediaStream);
     this.mediaStream = null;
     this.filter.reset();
+    this.lastValidGazeX = 0.5;
+    this.lastValidGazeY = 0.5;
     this.isProcessingFrame = false;
     this.isRecovering = false;
 
@@ -276,17 +280,26 @@ class WebcamManager {
                 }
 
                 // Dual-Axis Ridge Regression Gaze Estimation
-                const rawGaze = estimateGazeNorm(features, store.calibrationModel);
-                const smoothed = this.filter.filter(rawGaze.normX, rawGaze.normY, now);
+                let smoothedNormX = this.lastValidGazeX;
+                let smoothedNormY = this.lastValidGazeY;
 
-                let dynamicConfidence = features.confidence;
-                if (store.calibrationModel) {
+                if (!features.isBlink) {
+                  const rawGaze = estimateGazeNorm(features, store.calibrationModel);
+                  const smoothed = this.filter.filter(rawGaze.normX, rawGaze.normY, now);
+                  smoothedNormX = smoothed.x;
+                  smoothedNormY = smoothed.y;
+                  this.lastValidGazeX = smoothedNormX;
+                  this.lastValidGazeY = smoothedNormY;
+                }
+
+                let dynamicConfidence = features.isBlink ? 0.15 : features.confidence;
+                if (store.calibrationModel && !features.isBlink) {
                   dynamicConfidence = (dynamicConfidence + store.calibrationModel.qualityScore / 100) / 2;
                 }
 
                 gazeResult = {
-                  normX: smoothed.x,
-                  normY: smoothed.y,
+                  normX: smoothedNormX,
+                  normY: smoothedNormY,
                   confidence: dynamicConfidence,
                   timestamp: now,
                   isBlink: features.isBlink,
@@ -397,6 +410,8 @@ class WebcamManager {
         if (anyDead && this.videoElement) {
           stopCameraStream(this.videoElement, this.mediaStream);
           this.mediaStream = await startCameraStream(this.videoElement);
+        } else if (this.videoElement && (this.videoElement.paused || this.videoElement.ended)) {
+          await this.videoElement.play().catch(() => {});
         }
       }
 

@@ -14,11 +14,14 @@ import {
   ChevronRight,
   FlaskConical,
   Target,
+  Eye,
 } from "lucide-react";
+import { OperatorAccessControl } from "./OperatorAccessControl";
 
 const primaryNavItems = [
   { to: "/", label: "Patient Dashboard", icon: LayoutDashboard },
   { to: "/new-session", label: "New Patient Intake", icon: PlusSquare },
+  { to: "/baseline-assessment", label: "Baseline Visual (MBT)", icon: Eye },
   { to: "/calibration", label: "Gaze Calibration", icon: Crosshair },
   { to: "/assessment", label: "Assessment Hub", icon: Target },
   { to: "/reports", label: "Combined Reports", icon: FileText },
@@ -108,6 +111,9 @@ export function Sidebar() {
           )}
         </div>
       </nav>
+
+      {/* Operator Authentication Control */}
+      <OperatorAccessControl />
 
       {/* Footer Info */}
       <div className="border-t border-eyecog-navy-light/60 px-6 py-4 text-[11px] text-slate-400">

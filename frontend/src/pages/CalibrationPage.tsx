@@ -12,6 +12,7 @@ import {
   type CalibrationTarget,
   type ValidationSummary,
 } from "@/lib/webcam/calibration";
+import { targetToWindowNorm, windowNormToContainer } from "@/lib/webcam/coordinates";
 import {
   Camera,
   Crosshair,
@@ -27,6 +28,9 @@ import {
   Eye,
   ArrowRight,
 } from "lucide-react";
+
+const TARGET_DETECTED_THRESHOLD_PX = 100;
+const CONSECUTIVE_FRAMES_REQUIRED = 3;
 
 export function CalibrationPage() {
   const {
@@ -65,6 +69,12 @@ export function CalibrationPage() {
 
   // Interactive Target Inspection selection
   const [selectedTarget, setSelectedTarget] = useState<CalibrationTarget | null>(CALIBRATION_POINTS_9[4]); // Center
+
+  const lastSampleTimestampRef = useRef<number>(0);
+  const lastValTimestampRef = useRef<number>(0);
+
+  const [isTargetDetected, setIsTargetDetected] = useState(false);
+  const consecutiveFramesRef = useRef(0);
 
   // Viewport dimensions for accurate container-relative mapping
   const [viewportDims, setViewportDims] = useState({ w: 800, h: 450 });
@@ -201,22 +211,56 @@ export function CalibrationPage() {
   }, [isCameraActive, rawLandmarks]);
 
   // Compute container-relative screen pixel gaze
-  const pixelGazeX = currentGaze ? Math.round(currentGaze.normX * viewportDims.w) : 0;
-  const pixelGazeY = currentGaze ? Math.round(currentGaze.normY * viewportDims.h) : 0;
+  const containerGaze = currentGaze && viewportRef.current
+    ? windowNormToContainer(currentGaze.normX, currentGaze.normY, viewportRef.current.getBoundingClientRect())
+    : currentGaze
+    ? { x: Math.round(currentGaze.normX * viewportDims.w), y: Math.round(currentGaze.normY * viewportDims.h) }
+    : { x: 0, y: 0 };
+  const pixelGazeX = containerGaze.x;
+  const pixelGazeY = containerGaze.y;
 
-  // Selected inspection target pixel coords
-  const targetPxX = selectedTarget ? Math.round(selectedTarget.normX * viewportDims.w) : 0;
-  const targetPxY = selectedTarget ? Math.round(selectedTarget.normY * viewportDims.h) : 0;
+  // Active target coords depending on current flow state
+  const activeTarget = flowState === "calibrating"
+    ? CALIBRATION_POINTS_9[pointIndex]
+    : flowState === "validating"
+    ? VALIDATION_POINTS_5[pointIndex]
+    : selectedTarget;
+
+  const targetPxX = activeTarget ? Math.round(activeTarget.normX * viewportDims.w) : 0;
+  const targetPxY = activeTarget ? Math.round(activeTarget.normY * viewportDims.h) : 0;
   const targetDistancePx = Math.round(Math.hypot(pixelGazeX - targetPxX, pixelGazeY - targetPxY));
+
+  // Anti-flicker hysteresis state update: requires consecutive valid frames before switching
+  useEffect(() => {
+    if (!isCameraActive || !faceDetected || !eyesDetected || !currentGaze) {
+      setIsTargetDetected(false);
+      consecutiveFramesRef.current = 0;
+      return;
+    }
+
+    const isNear = targetDistancePx <= TARGET_DETECTED_THRESHOLD_PX;
+    if (isNear !== isTargetDetected) {
+      consecutiveFramesRef.current += 1;
+      if (consecutiveFramesRef.current >= CONSECUTIVE_FRAMES_REQUIRED) {
+        setIsTargetDetected(isNear);
+        consecutiveFramesRef.current = 0;
+      }
+    } else {
+      consecutiveFramesRef.current = 0;
+    }
+  }, [targetDistancePx, isTargetDetected, isCameraActive, faceDetected, eyesDetected, currentGaze]);
 
   // 1. Start 9-Point Calibration Routine
   const handleStartCalibration = () => {
+    viewportRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     setFlowState("calibrating");
     setPointIndex(0);
-    setSettlingStep(2);
+    setSettlingStep(3);
     setPointSampleProgress(0);
     setCollectedCalibSamples([]);
     setValidationSamplesMap([]);
+    lastSampleTimestampRef.current = 0;
+    lastValTimestampRef.current = 0;
   };
 
   // 9-Point Calibration State Machine with Fixation Settle (500-800ms) & Outlier Filtering
@@ -225,7 +269,8 @@ export function CalibrationPage() {
 
     if (pointIndex >= CALIBRATION_POINTS_9.length) {
       // Completed all 9 points -> Train Model X and Model Y separately
-      const profile = trainCalibrationModel(collectedCalibSamples, viewportDims.w, viewportDims.h);
+      const win = typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : viewportDims;
+      const profile = trainCalibrationModel(collectedCalibSamples, win.w, win.h);
       if (profile) {
         setCalibrationModel(profile);
         // Automatically transition into 5-point independent validation phase
@@ -233,6 +278,7 @@ export function CalibrationPage() {
         setPointIndex(0);
         setSettlingStep(2);
         setPointSampleProgress(0);
+        lastValTimestampRef.current = 0;
       } else {
         setFlowState("idle");
       }
@@ -259,41 +305,61 @@ export function CalibrationPage() {
       const feat = useGazeStore.getState().lastFeatures;
       const isDetected = useGazeStore.getState().faceDetected && useGazeStore.getState().eyesDetected;
 
-      // Ignore frames with missing face/eyes, blinks, or low confidence
-      if (feat && isDetected && !feat.isBlink && feat.confidence > 0.45) {
-        const { featuresX, featuresY } = extractRegressionFeatures(feat);
-        const meanRelX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
-        const meanRelY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
-
-        targetSamples.push({
-          targetId: currentTarget.id,
-          targetX: currentTarget.normX,
-          targetY: currentTarget.normY,
-          targetPxX: targetPxX_now,
-          targetPxY: targetPxY_now,
-          leftRelativeX: feat.leftIrisX,
-          leftRelativeY: feat.leftIrisY,
-          rightRelativeX: feat.rightIrisX,
-          rightRelativeY: feat.rightIrisY,
-          meanRelativeX: meanRelX,
-          meanRelativeY: meanRelY,
-          headYaw: feat.headYaw,
-          headPitch: feat.headPitch,
-          faceCenterX: feat.faceCenterX,
-          faceCenterY: feat.faceCenterY,
-          featuresX,
-          featuresY,
-          timestamp: performance.now(),
-        });
-        collectedCount++;
-        setPointSampleProgress(Math.round((collectedCount / 35) * 100));
+      if (!feat || !isDetected || feat.isBlink || feat.confidence <= 0.45 || feat.timestamp === lastSampleTimestampRef.current) {
+        return;
       }
 
-      if (collectedCount >= 35) {
+      if (Math.abs(feat.headYaw) > 0.22 || Math.abs(feat.headPitch) > 0.22) {
+        return;
+      }
+
+      lastSampleTimestampRef.current = feat.timestamp;
+      const { featuresX, featuresY } = extractRegressionFeatures(feat);
+      const meanRelX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
+      const meanRelY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
+
+      let sampleTargetX = currentTarget.normX;
+      let sampleTargetY = currentTarget.normY;
+      let sampleTargetPxX = targetPxX_now;
+      let sampleTargetPxY = targetPxY_now;
+
+      if (viewportRef.current) {
+        const rect = viewportRef.current.getBoundingClientRect();
+        const winNorm = targetToWindowNorm(currentTarget.normX, currentTarget.normY, rect);
+        sampleTargetX = winNorm.normX;
+        sampleTargetY = winNorm.normY;
+        sampleTargetPxX = Math.round(rect.left + currentTarget.normX * rect.width);
+        sampleTargetPxY = Math.round(rect.top + currentTarget.normY * rect.height);
+      }
+
+      targetSamples.push({
+        targetId: currentTarget.id,
+        targetX: sampleTargetX,
+        targetY: sampleTargetY,
+        targetPxX: sampleTargetPxX,
+        targetPxY: sampleTargetPxY,
+        leftRelativeX: feat.leftIrisX,
+        leftRelativeY: feat.leftIrisY,
+        rightRelativeX: feat.rightIrisX,
+        rightRelativeY: feat.rightIrisY,
+        meanRelativeX: meanRelX,
+        meanRelativeY: meanRelY,
+        headYaw: feat.headYaw,
+        headPitch: feat.headPitch,
+        faceCenterX: feat.faceCenterX,
+        faceCenterY: feat.faceCenterY,
+        featuresX,
+        featuresY,
+        timestamp: feat.timestamp,
+      });
+      collectedCount++;
+      setPointSampleProgress(Math.round((collectedCount / 30) * 100));
+
+      if (collectedCount >= 30) {
         clearInterval(interval);
         setCollectedCalibSamples((prev) => [...prev, ...targetSamples]);
         setPointIndex((idx) => idx + 1);
-        setSettlingStep(2);
+        setSettlingStep(3);
         setPointSampleProgress(0);
       }
     }, 30);
@@ -306,7 +372,7 @@ export function CalibrationPage() {
     if (flowState !== "validating") return;
 
     if (pointIndex >= VALIDATION_POINTS_5.length) {
-      // Completed validation -> run rigorous empirical evaluation
+      // Completed validation -> run rigorous empirical evaluation in container coordinates
       const model = useGazeStore.getState().calibrationModel;
       if (model && validationSamplesMap.length > 0) {
         const summary = validateCalibrationModel(
@@ -337,44 +403,64 @@ export function CalibrationPage() {
     }
 
     let collectedCount = 0;
+    let tickCount = 0;
     const valTargetSamples: CalibrationSample[] = [];
     const valPxX = Math.round(currentValTarget.normX * viewportDims.w);
     const valPxY = Math.round(currentValTarget.normY * viewportDims.h);
 
     const interval = setInterval(() => {
+      const gaze = useGazeStore.getState().currentGaze;
       const feat = useGazeStore.getState().lastFeatures;
       const isDetected = useGazeStore.getState().faceDetected && useGazeStore.getState().eyesDetected;
 
-      if (feat && isDetected && !feat.isBlink && feat.confidence > 0.45) {
-        const { featuresX, featuresY } = extractRegressionFeatures(feat);
-        const meanRelX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
-        const meanRelY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
-
-        valTargetSamples.push({
-          targetId: currentValTarget.id,
-          targetX: currentValTarget.normX,
-          targetY: currentValTarget.normY,
-          targetPxX: valPxX,
-          targetPxY: valPxY,
-          leftRelativeX: feat.leftIrisX,
-          leftRelativeY: feat.leftIrisY,
-          rightRelativeX: feat.rightIrisX,
-          rightRelativeY: feat.rightIrisY,
-          meanRelativeX: meanRelX,
-          meanRelativeY: meanRelY,
-          headYaw: feat.headYaw,
-          headPitch: feat.headPitch,
-          faceCenterX: feat.faceCenterX,
-          faceCenterY: feat.faceCenterY,
-          featuresX,
-          featuresY,
-          timestamp: performance.now(),
-        });
-        collectedCount++;
-        setPointSampleProgress(Math.round((collectedCount / 25) * 100));
+      if (!feat || !isDetected || feat.isBlink || feat.confidence <= 0.45 || feat.timestamp === lastValTimestampRef.current) {
+        return;
       }
 
-      if (collectedCount >= 25) {
+      if (Math.abs(feat.headYaw) > 0.22 || Math.abs(feat.headPitch) > 0.22) {
+        return;
+      }
+
+      tickCount++;
+
+      // Compute container-relative screen pixel gaze
+      const containerPt = gaze && viewportRef.current
+        ? windowNormToContainer(gaze.normX, gaze.normY, viewportRef.current.getBoundingClientRect())
+        : gaze
+        ? { x: Math.round(gaze.normX * viewportDims.w), y: Math.round(gaze.normY * viewportDims.h) }
+        : null;
+
+      lastValTimestampRef.current = feat.timestamp;
+      const { featuresX, featuresY } = extractRegressionFeatures(feat);
+      const meanRelX = (feat.leftIrisX + feat.rightIrisX) / 2.0;
+      const meanRelY = (feat.leftIrisY + feat.rightIrisY) / 2.0;
+
+      valTargetSamples.push({
+        targetId: currentValTarget.id,
+        targetX: currentValTarget.normX,
+        targetY: currentValTarget.normY,
+        targetPxX: valPxX,
+        targetPxY: valPxY,
+        predictedPxX: containerPt ? containerPt.x : undefined,
+        predictedPxY: containerPt ? containerPt.y : undefined,
+        leftRelativeX: feat.leftIrisX,
+        leftRelativeY: feat.leftIrisY,
+        rightRelativeX: feat.rightIrisX,
+        rightRelativeY: feat.rightIrisY,
+        meanRelativeX: meanRelX,
+        meanRelativeY: meanRelY,
+        headYaw: feat.headYaw,
+        headPitch: feat.headPitch,
+        faceCenterX: feat.faceCenterX,
+        faceCenterY: feat.faceCenterY,
+        featuresX,
+        featuresY,
+        timestamp: feat.timestamp,
+      });
+      collectedCount++;
+      setPointSampleProgress(Math.round((collectedCount / 20) * 100));
+
+      if (collectedCount >= 20) {
         clearInterval(interval);
         setValidationSamplesMap((prev) => [
           ...prev,
@@ -653,10 +739,19 @@ export function CalibrationPage() {
               Interactive 9-Point Target Inspection &amp; Live Distance Error
             </h2>
           </div>
-          <div className="flex items-center gap-4 text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
             <span>Target: <strong className="text-slate-700">{selectedTarget?.label} ({targetPxX}, {targetPxY}) px</strong></span>
             <span>Webcam Gaze: <strong className="text-eyecog-teal">({pixelGazeX}, {pixelGazeY}) px</strong></span>
-            <span>Distance Error: <strong className={targetDistancePx < 55 ? "text-emerald-600 font-bold" : "text-amber-600 font-bold"}>{targetDistancePx} px</strong></span>
+            <span>Distance: <strong className={isTargetDetected ? "text-emerald-600 font-bold" : "text-slate-600"}>{targetDistancePx} px</strong></span>
+            {isTargetDetected ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 text-white px-3 py-1 text-xs font-bold shadow-xs transition-colors">
+                ✓ Target Detected
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 text-slate-700 px-3 py-1 text-xs font-medium transition-colors">
+                Looking for target...
+              </span>
+            )}
           </div>
         </div>
 
@@ -666,7 +761,10 @@ export function CalibrationPage() {
               <button
                 key={point.id}
                 type="button"
-                onClick={() => setSelectedTarget(point)}
+                onClick={() => {
+                  setSelectedTarget(point);
+                  viewportRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
                 className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
                   selectedTarget?.id === point.id
                     ? "bg-eyecog-navy text-white shadow-sm"
@@ -746,11 +844,29 @@ export function CalibrationPage() {
               }}
             >
               <div className="relative flex h-10 w-10 items-center justify-center">
-                <span className="absolute h-full w-full rounded-full border-2 border-sky-400 animate-ping opacity-75" />
-                <span className="h-5 w-5 rounded-full bg-sky-500 border-2 border-white shadow-lg" />
+                <span
+                  className={`absolute h-full w-full rounded-full border-2 animate-ping ${
+                    isTargetDetected
+                      ? "border-emerald-400 bg-emerald-400/25 opacity-90"
+                      : "border-sky-400 opacity-75"
+                  }`}
+                />
+                <span
+                  className={`h-5 w-5 rounded-full border-2 border-white shadow-lg transition-colors duration-150 ${
+                    isTargetDetected
+                      ? "bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,0.9)]"
+                      : "bg-sky-500 shadow-[0_0_12px_rgba(14,165,233,0.5)]"
+                  }`}
+                />
               </div>
-              <span className="mt-1 rounded bg-slate-900/90 px-2 py-0.5 text-[10px] font-mono font-bold text-sky-300 border border-sky-400/40">
-                Target ({targetPxX}, {targetPxY})
+              <span
+                className={`mt-1.5 rounded px-2.5 py-0.5 text-[10px] font-mono font-bold border transition-colors shadow-xs ${
+                  isTargetDetected
+                    ? "bg-emerald-950/90 text-emerald-300 border-emerald-500/60"
+                    : "bg-slate-900/90 text-slate-300 border-slate-700"
+                }`}
+              >
+                {isTargetDetected ? "✓ Target Detected" : "Looking for target..."}
               </span>
             </div>
           )}
@@ -765,11 +881,31 @@ export function CalibrationPage() {
               }}
             >
               <div className="relative flex h-14 w-14 items-center justify-center">
-                <span className="absolute h-full w-full rounded-full bg-eyecog-teal/40 animate-ping" />
-                <span className="h-7 w-7 rounded-full bg-eyecog-teal border-4 border-white shadow-[0_0_20px_rgba(45,212,191,1)]" />
+                <span
+                  className={`absolute h-full w-full rounded-full animate-ping ${
+                    isTargetDetected ? "bg-emerald-400/50" : "bg-eyecog-teal/40"
+                  }`}
+                />
+                <span
+                  className={`h-7 w-7 rounded-full border-4 border-white transition-colors duration-150 ${
+                    isTargetDetected
+                      ? "bg-emerald-500 shadow-[0_0_24px_rgba(16,185,129,1)]"
+                      : "bg-eyecog-teal shadow-[0_0_20px_rgba(45,212,191,1)]"
+                  }`}
+                />
               </div>
-              <span className="mt-2 rounded bg-black/90 px-3 py-1 text-xs font-bold text-white uppercase tracking-wider border border-teal-500/40 shadow-md">
-                {settlingStep > 0 ? "Focusing..." : `Sampling (${pointIndex + 1}/9)`}
+              <span
+                className={`mt-2 rounded px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-md border transition-colors ${
+                  isTargetDetected
+                    ? "bg-emerald-600 text-white border-emerald-400"
+                    : "bg-black/90 text-white border-teal-500/40"
+                }`}
+              >
+                {isTargetDetected
+                  ? "✓ Target Detected"
+                  : settlingStep > 0
+                  ? "Looking for target..."
+                  : `Sampling (${pointIndex + 1}/9)`}
               </span>
             </div>
           )}
@@ -784,11 +920,31 @@ export function CalibrationPage() {
               }}
             >
               <div className="relative flex h-14 w-14 items-center justify-center">
-                <span className="absolute h-full w-full rounded-full bg-amber-400/40 animate-ping" />
-                <span className="h-7 w-7 rounded-full bg-amber-400 border-4 border-white shadow-[0_0_20px_rgba(251,191,36,1)]" />
+                <span
+                  className={`absolute h-full w-full rounded-full animate-ping ${
+                    isTargetDetected ? "bg-emerald-400/50" : "bg-amber-400/40"
+                  }`}
+                />
+                <span
+                  className={`h-7 w-7 rounded-full border-4 border-white transition-colors duration-150 ${
+                    isTargetDetected
+                      ? "bg-emerald-500 shadow-[0_0_24px_rgba(16,185,129,1)]"
+                      : "bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,1)]"
+                  }`}
+                />
               </div>
-              <span className="mt-2 rounded bg-black/90 px-3 py-1 text-xs font-bold text-amber-300 uppercase tracking-wider border border-amber-400/40 shadow-md">
-                {settlingStep > 0 ? "Hold Gaze..." : `Validating Target (${pointIndex + 1}/5)`}
+              <span
+                className={`mt-2 rounded px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-md border transition-colors ${
+                  isTargetDetected
+                    ? "bg-emerald-600 text-white border-emerald-400"
+                    : "bg-black/90 text-amber-300 border-amber-400/40"
+                }`}
+              >
+                {isTargetDetected
+                  ? "✓ Target Detected"
+                  : settlingStep > 0
+                  ? "Looking for target..."
+                  : `Validating Target (${pointIndex + 1}/5)`}
               </span>
             </div>
           )}
@@ -798,8 +954,8 @@ export function CalibrationPage() {
             <div
               className="pointer-events-none absolute z-25 -translate-x-1/2 -translate-y-1/2 transition-transform duration-75 ease-out"
               style={{
-                left: `${currentGaze.normX * 100}%`,
-                top: `${currentGaze.normY * 100}%`,
+                left: `${pixelGazeX}px`,
+                top: `${pixelGazeY}px`,
               }}
             >
               <div className="relative flex h-9 w-9 items-center justify-center">
@@ -818,11 +974,11 @@ export function CalibrationPage() {
               <line
                 x1={`${selectedTarget.normX * 100}%`}
                 y1={`${selectedTarget.normY * 100}%`}
-                x2={`${currentGaze.normX * 100}%`}
-                y2={`${currentGaze.normY * 100}%`}
-                stroke="rgba(45, 212, 191, 0.4)"
-                strokeWidth="2"
-                strokeDasharray="4 4"
+                x2={`${pixelGazeX}px`}
+                y2={`${pixelGazeY}px`}
+                stroke={isTargetDetected ? "rgba(16, 185, 129, 0.7)" : "rgba(45, 212, 191, 0.4)"}
+                strokeWidth={isTargetDetected ? "2.5" : "1.5"}
+                strokeDasharray={isTargetDetected ? undefined : "4 4"}
               />
             </svg>
           )}

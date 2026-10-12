@@ -51,6 +51,7 @@ import {
   globalTaskEventManager,
 } from "@/lib/webcam/gazeEvents";
 import { MemoryVisualizer } from "@/components/tasks/MemoryVisualizer";
+import { windowNormToContainer } from "@/lib/webcam/coordinates";
 import { completeSession, createSession, getAssessment } from "@/lib/api";
 
 type Phase = "intro" | "study" | "retention" | "recognition" | "results";
@@ -214,10 +215,9 @@ export function MemoryRecognitionTaskPage() {
     let gy = 0;
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      const screenX = currentGaze.normX * window.innerWidth;
-      const screenY = currentGaze.normY * window.innerHeight;
-      gx = Math.round(screenX - rect.left);
-      gy = Math.round(screenY - rect.top);
+      const pt = windowNormToContainer(currentGaze.normX, currentGaze.normY, rect);
+      gx = pt.x;
+      gy = pt.y;
     } else {
       gx = Math.round(currentGaze.normX * CONTAINER_WIDTH);
       gy = Math.round(currentGaze.normY * CONTAINER_HEIGHT);

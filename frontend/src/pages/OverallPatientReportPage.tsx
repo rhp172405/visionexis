@@ -15,10 +15,15 @@ import {
   Info,
 } from "lucide-react";
 
-import { getCombinedReport, getApiUrl } from "@/lib/api";
+import { getCombinedReport, getBaselineAssessment, getApiUrl } from "@/lib/api";
 import { useGazeStore } from "@/stores/gazeStore";
 import { globalWebcamManager } from "@/lib/webcam/webcamManager";
 import { formatAccuracy, formatSeconds, accuracyColor } from "@/lib/format";
+import { buildIntegratedProfile } from "@/lib/integratedVisualCognitiveAnalysis";
+import {
+  BaselineVisualFunctionProfileSection,
+  IntegratedCrossDomainAnalysisSection,
+} from "@/components/analysis/IntegratedAnalysisSection";
 
 export function OverallPatientReportPage() {
   const { assessmentId } = useParams<{ assessmentId: string }>();
@@ -44,6 +49,15 @@ export function OverallPatientReportPage() {
     queryFn: () => getCombinedReport(assessmentId!),
     enabled: !!assessmentId,
   });
+
+  const { data: baselineData } = useQuery({
+    queryKey: ["baseline-assessment", assessmentId],
+    queryFn: () => getBaselineAssessment(assessmentId!),
+    enabled: !!assessmentId,
+  });
+
+  const effectiveBaseline = report?.baseline_assessment || baselineData || null;
+  const integratedProfile = report ? buildIntegratedProfile(report, effectiveBaseline) : null;
 
   const handleDownloadPDF = async () => {
     if (!assessmentId || !report) return;
@@ -75,7 +89,12 @@ export function OverallPatientReportPage() {
 
   const handleExportJSON = () => {
     if (!report) return;
-    const jsonStr = JSON.stringify(report, null, 2);
+    const exportData = {
+      ...report,
+      baseline_assessment: effectiveBaseline,
+      integrated_visual_cognitive_analysis: integratedProfile,
+    };
+    const jsonStr = JSON.stringify(exportData, null, 2);
     const blob = new Blob([jsonStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -245,14 +264,29 @@ export function OverallPatientReportPage() {
                 {isFullyCompleted ? "Completed (3/3)" : `In Progress (${report.tasks_completed}/3)`}
               </span>
             </div>
+            {(report.patient_age != null || report.patient_gender) && (
+              <div className="flex justify-between pt-1 border-t border-slate-200/60 text-[11px] text-slate-500">
+                <span>Demographics:</span>
+                <span>
+                  {report.patient_age != null ? `${report.patient_age} yrs` : ""}
+                  {report.patient_age != null && report.patient_gender ? " • " : ""}
+                  {report.patient_gender || ""}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Calibration & Validation Quality Indicator */}
+        {/* SECTION 2: BASELINE VISUAL FUNCTION PROFILE (MBT) */}
+        {integratedProfile && (
+          <BaselineVisualFunctionProfileSection profile={integratedProfile} />
+        )}
+
+        {/* SECTION 3: CALIBRATION & DATA QUALITY */}
         <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-5 space-y-2">
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
             <ShieldCheck className="h-4 w-4 text-eyecog-teal" />
-            Calibration &amp; Gaze Validation Quality Indicator
+            3. Gaze Calibration and Data Quality
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
             <div>
@@ -282,7 +316,7 @@ export function OverallPatientReportPage() {
           </div>
         </div>
 
-        {/* SECTION 1: VISUAL SEARCH RESULTS */}
+        {/* SECTION 4: VISUAL SEARCH RESULTS */}
         <div className="rounded-xl border border-slate-200 p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2.5">
@@ -290,7 +324,7 @@ export function OverallPatientReportPage() {
                 <Target className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-800">1. Visual Search Task Results</h3>
+                <h3 className="text-base font-bold text-slate-800">4. Visual Search Task Results</h3>
                 <p className="text-xs text-slate-500">
                   Feature and conjunction target detection across 20 trials.
                 </p>
@@ -359,7 +393,7 @@ export function OverallPatientReportPage() {
           )}
         </div>
 
-        {/* SECTION 2: MEMORY & RECOGNITION RESULTS */}
+        {/* SECTION 5: MEMORY & RECOGNITION RESULTS */}
         <div className="rounded-xl border border-slate-200 p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2.5">
@@ -367,7 +401,7 @@ export function OverallPatientReportPage() {
                 <Brain className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-800">2. Memory &amp; Recognition Task Results</h3>
+                <h3 className="text-base font-bold text-slate-800">5. Memory &amp; Recognition Task Results</h3>
                 <p className="text-xs text-slate-500">
                   Study phase (20 items), 4-second retention, recognition phase (40 items) with Signal Detection Theory (SDT).
                 </p>
@@ -436,7 +470,7 @@ export function OverallPatientReportPage() {
           )}
         </div>
 
-        {/* SECTION 3: READING & COMPREHENSION RESULTS */}
+        {/* SECTION 6: READING & COMPREHENSION RESULTS */}
         <div className="rounded-xl border border-slate-200 p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2.5">
@@ -444,7 +478,7 @@ export function OverallPatientReportPage() {
                 <BookOpenText className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-800">3. Reading &amp; Comprehension Task Results</h3>
+                <h3 className="text-base font-bold text-slate-800">6. Reading &amp; Comprehension Task Results</h3>
                 <p className="text-xs text-slate-500">
                   Natural passage reading dynamics, regression saccades, and multiple-choice comprehension questions.
                 </p>
@@ -512,6 +546,11 @@ export function OverallPatientReportPage() {
             <p className="text-xs text-slate-400 italic">This task was not completed during this assessment attempt.</p>
           )}
         </div>
+
+        {/* SECTION 7 & 8: INTEGRATED VISUAL–COGNITIVE ANALYSIS & RESEARCH INTERPRETATION */}
+        {integratedProfile && (
+          <IntegratedCrossDomainAnalysisSection profile={integratedProfile} />
+        )}
 
         {/* SECTION 4: OVERALL SUMMARY & DATA QUALITY WARNINGS */}
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 space-y-4">

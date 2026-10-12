@@ -13,6 +13,8 @@ interface FormState {
   name: string;
   age: string;
   gender: string[];
+  educationLevel: string;
+  studyNotes: string;
   refractiveStatus: string[];
   spectacleUse: string[];
   avgScreenTime: string[];
@@ -39,6 +41,8 @@ const initialForm: FormState = {
   name: "",
   age: "",
   gender: [],
+  educationLevel: "",
+  studyNotes: "",
   refractiveStatus: [],
   spectacleUse: [],
   avgScreenTime: [],
@@ -82,7 +86,7 @@ export function NewSessionPage() {
       setPatient(patient);
       const assessment = await createAssessment(patient.id);
       setAssessment(assessment);
-      navigate("/calibration");
+      navigate("/baseline-assessment");
     },
   });
 
@@ -118,9 +122,11 @@ export function NewSessionPage() {
       form.spectacleUse.length > 0 ||
       form.avgScreenTime.length > 0;
 
+    const finalName = form.name.trim() || form.patientCode.trim() || "Participant";
+
     patientMutation.mutate({
       patient_code: strOrNull(form.patientCode) ?? undefined,
-      name: form.name.trim(),
+      name: finalName,
       age: numOrNull(form.age) ?? undefined,
       gender: form.gender[0] ?? undefined,
       visual_history: hasVisualHistory
@@ -142,27 +148,29 @@ export function NewSessionPage() {
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-4xl space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-800">Patient Information Form</h2>
+        <h2 className="text-lg font-semibold text-slate-800">Patient / Research Participant Registration</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Complete demographic details to begin an assessment. Visual history and clinical vision findings are optional.
+          Complete demographic details to begin an assessment. Pseudonymous IDs are supported for research protocols.
         </p>
       </div>
 
-      <FormSection title="1. Basic Demographic Details">
-        <Field label="Patient ID" value={form.patientCode} onChange={(v) => set("patientCode", v)}
-               placeholder="Auto-assigned if left blank" hint="e.g. P-007" />
-        <Field label="Name (or Initials) *" value={form.name} onChange={(v) => set("name", v)} placeholder="e.g. A.S." />
+      <FormSection title="1. Participant Identification & Demographics">
+        <Field label="Participant / Patient ID" value={form.patientCode} onChange={(v) => set("patientCode", v)}
+               placeholder="Auto-assigned if left blank (e.g. P-001, PART-101)" hint="Pseudonymous ID for research anonymity" />
+        <Field label="Name or Initials (Optional for anonymous research)" value={form.name} onChange={(v) => set("name", v)} placeholder="e.g. A.S. or leave blank to use Participant ID" />
         <Field label="Age" type="number" value={form.age} onChange={(v) => set("age", v)} />
+        <Field label="Education Level (Optional)" value={form.educationLevel} onChange={(v) => set("educationLevel", v)} placeholder="e.g. Undergraduate, High School" />
         <ToggleGroup
           label="Gender"
           options={[
             { label: "Male", value: "male" },
             { label: "Female", value: "female" },
-            { label: "Other", value: "other" },
+            { label: "Other / Not Disclosed", value: "other" },
           ]}
           value={form.gender}
           onChange={(v) => set("gender", v)}
         />
+        <Field label="Study Protocol Notes" value={form.studyNotes} onChange={(v) => set("studyNotes", v)} placeholder="Optional researcher notes or cohort tag" />
       </FormSection>
 
       <FormSection title="2. Visual History (Optional)">
@@ -238,17 +246,17 @@ export function NewSessionPage() {
 
       {patientMutation.isError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Failed to register patient. Please check the form and try again.
+          {(patientMutation.error as Error)?.message || "Failed to register patient. Please check the form and try again."}
         </div>
       )}
 
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={!form.name.trim() || patientMutation.isPending}
+          disabled={(!form.name.trim() && !form.patientCode.trim()) || patientMutation.isPending}
           className="rounded-md bg-eyecog-teal px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {patientMutation.isPending ? "Saving…" : "Register Patient & Continue"}
+          {patientMutation.isPending ? "Saving…" : "Register & Proceed to Baseline Visual Assessment"}
         </button>
       </div>
     </form>

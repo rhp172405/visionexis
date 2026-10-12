@@ -162,9 +162,14 @@ export function extractEyeFeatures(
   const leftEyeWidth = Math.max(maxLeftX - minLeftX, 1e-4);
   const leftEyeHeight = Math.max(maxLeftY - minLeftY, 1e-4);
 
-  // Normalized relative iris coordinates inside left eye socket [0..1]
+  // Robust normalized vertical iris position:
+  // The canthal axis (eye corners) normalized by constant eye width is the primary skull-fixed reference.
+  // In anatomical primary gaze, the iris center is naturally ~0.06 * eyeWidth above the intercanthal line.
+  // Centering around this neutral baseline gives a symmetric, linear vertical signal (~0.5 at rest)
+  // that is not compromised by physiological eyelid drop (ptosis) during downgaze.
+  const leftCanthusY = (leftOuter.y + leftInner.y) / 2.0;
   const leftIrisX = clamp((leftIris.x - minLeftX) / leftEyeWidth, 0.0, 1.0);
-  const leftIrisY = clamp((leftIris.y - minLeftY) / leftEyeHeight, 0.0, 1.0);
+  const leftIrisY = clamp(0.5 + ((leftIris.y - leftCanthusY) / leftEyeWidth + 0.06) * 3.6, 0.0, 1.0);
   const leftEar = computeEar(leftOuter, leftInner, leftTop2, leftBottom2, leftTop3, leftBottom3);
 
   // Right eye geometry & normalized boundaries
@@ -175,9 +180,9 @@ export function extractEyeFeatures(
   const rightEyeWidth = Math.max(maxRightX - minRightX, 1e-4);
   const rightEyeHeight = Math.max(maxRightY - minRightY, 1e-4);
 
-  // Normalized relative iris coordinates inside right eye socket [0..1]
+  const rightCanthusY = (rightOuter.y + rightInner.y) / 2.0;
   const rightIrisX = clamp((rightIris.x - minRightX) / rightEyeWidth, 0.0, 1.0);
-  const rightIrisY = clamp((rightIris.y - minRightY) / rightEyeHeight, 0.0, 1.0);
+  const rightIrisY = clamp(0.5 + ((rightIris.y - rightCanthusY) / rightEyeWidth + 0.06) * 3.6, 0.0, 1.0);
   const rightEar = computeEar(rightOuter, rightInner, rightTop2, rightBottom2, rightTop3, rightBottom3);
 
   const meanEar = (leftEar + rightEar) / 2.0;
@@ -190,9 +195,10 @@ export function extractEyeFeatures(
   const faceHeight = distance(forehead, chin);
   const faceSize = (faceWidth + faceHeight) / 2.0;
 
-  // Head orientation proxies
+  // Head orientation proxies (both centered at 0 in neutral posture)
   const headYaw = (faceWidth > 1e-4) ? (nose.x - betweenEyes.x) / faceWidth : 0;
-  const headPitch = (faceHeight > 1e-4) ? (nose.y - betweenEyes.y) / faceHeight : 0;
+  const rawPitch = (faceHeight > 1e-4) ? (nose.y - betweenEyes.y) / faceHeight : 0;
+  const headPitch = rawPitch - 0.15; // Centered around neutral glabella-to-nose anatomical ratio
 
   // Relative mean iris position
   const meanRelX = (leftIrisX + rightIrisX) / 2.0;
